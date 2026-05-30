@@ -43,6 +43,12 @@ if "chat_history" not in st.session_state:
 if "voice_question" not in st.session_state:
     st.session_state.voice_question = ""
 
+if "current_question" not in st.session_state:
+    st.session_state.current_question = ""
+
+if "generated_quiz" not in st.session_state:
+    st.session_state.generated_quiz = ""
+
 
 # -------------------- HEADER --------------------
 st.markdown("""
@@ -56,8 +62,9 @@ st.markdown("""
         <span class="top-badge">📄 Multi-PDF RAG</span>
         <span class="top-badge">📌 Page Citations</span>
         <span class="top-badge">🎙️ Voice Input</span>
+        <span class="top-badge">🧠 Conversation Memory</span>
+        <span class="top-badge">🎯 Quiz Generator</span>
         <span class="top-badge">📥 PDF Export</span>
-        <span class="top-badge">💬 Chat History</span>
     </div>
 </div>
 """, unsafe_allow_html=True)
@@ -196,6 +203,30 @@ def retrieve(question, index, chunks):
     return results
 
 
+def build_context(results):
+    context_parts = []
+
+    for r in results:
+        context_parts.append(
+            f"Source: {r['source']} | Page: {r['page']} | Type: {r['type']}\n{r['text']}"
+        )
+
+    return "\n\n".join(context_parts)
+
+
+def build_conversation_memory():
+    if not st.session_state.chat_history:
+        return "No previous conversation."
+
+    recent_history = st.session_state.chat_history[-3:]
+
+    memory = []
+    for item in recent_history:
+        memory.append(f"Previous Question: {item['question']}\nPrevious Answer: {item['answer']}")
+
+    return "\n\n".join(memory)
+
+
 def get_answer_style_prompt(answer_style):
     if answer_style == "Brief":
         return """
@@ -228,12 +259,12 @@ Answer Style:
 
 def get_num_predict(answer_style):
     if answer_style == "Brief":
-        return 300
+        return 350
     if answer_style == "Detailed":
-        return 650
+        return 800
     if answer_style == "Exam Notes":
-        return 600
-    return 500
+        return 750
+    return 600
 
 
 def get_groq_api_key():
@@ -254,6 +285,7 @@ def ask_groq(question, context, source_mode, answer_style):
 
     style_prompt = get_answer_style_prompt(answer_style)
     max_tokens = get_num_predict(answer_style)
+    conversation_memory = build_conversation_memory()
 
     system_prompt = f"""
 You are a helpful AI teaching assistant.
@@ -261,11 +293,11 @@ You are a helpful AI teaching assistant.
 Knowledge source selected by user: {source_mode}
 
 Rules:
-1. Use only the provided context.
-2. Do not use outside knowledge unless clearly needed for a small explanation.
-3. If the retrieved context is weak, unrelated, or does not clearly answer the question, say:
+1. Use only the provided retrieved context for factual answering.
+2. Use conversation memory only to understand follow-up questions.
+3. Do not invent facts.
+4. If the retrieved context is weak, unrelated, or does not clearly answer the question, say:
    "The selected knowledge source does not contain enough information about this."
-4. Do not guess.
 5. Keep the response clear and student-friendly.
 6. When possible, naturally mention the source document or lecture context.
 
@@ -273,10 +305,13 @@ Rules:
 """
 
     user_prompt = f"""
-Context:
+Conversation Memory:
+{conversation_memory}
+
+Retrieved Context:
 {context}
 
-Question:
+Current Question:
 {question}
 
 Answer:
@@ -293,6 +328,52 @@ Answer:
             ],
             temperature=0.3,
             max_tokens=max_tokens
+        )
+
+        return response.choices[0].message.content.strip()
+
+    except Exception as e:
+        return f"Groq error: {e}"
+
+
+def generate_quiz(context, source_mode):
+    api_key = get_groq_api_key()
+
+    if not api_key:
+        return "GROQ_API_KEY is missing."
+
+    prompt = f"""
+You are an AI teaching assistant.
+
+Create a useful quiz from the provided study material.
+
+Rules:
+- Generate 5 multiple choice questions.
+- Each question should have 4 options: A, B, C, D.
+- Mark the correct answer.
+- Add a short explanation after each answer.
+- Use only the provided context.
+- Keep it student-friendly.
+
+Knowledge source: {source_mode}
+
+Context:
+{context}
+
+Quiz:
+"""
+
+    try:
+        client = Groq(api_key=api_key)
+
+        response = client.chat.completions.create(
+            model=GROQ_MODEL,
+            messages=[
+                {"role": "system", "content": "You create accurate educational quizzes from provided context."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.25,
+            max_tokens=900
         )
 
         return response.choices[0].message.content.strip()
@@ -342,6 +423,11 @@ def create_answer_pdf(question, answer, source_mode, answer_style):
     buffer.close()
 
     return pdf_bytes
+
+
+def set_suggested_question(question):
+    st.session_state.current_question = question
+    st.session_state.voice_question = question
 
 
 # -------------------- SIDEBAR --------------------
@@ -411,6 +497,7 @@ st.sidebar.markdown(f"""
 
 if st.sidebar.button("Clear Chat History"):
     st.session_state.chat_history = []
+    st.session_state.generated_quiz = ""
     st.sidebar.success("Chat history cleared.")
 
 
@@ -502,6 +589,53 @@ if all_chunks:
     with st.spinner("Creating search index..."):
         index = cached_build_index(tuple(chunk_texts))
 
+    # -------------------- SUGGESTED QUESTIONS --------------------
+    st.markdown("### 💡 Suggested Questions")
+
+    suggested_questions = [
+        "Summarize this document in simple language",
+        "Explain the key concepts from this material",
+        "Create exam notes from this PDF",
+        "Generate 5 important questions from this document",
+        "What are the most important points to remember?"
+    ]
+
+    q_cols = st.columns(2)
+
+    for i, suggested_q in enumerate(suggested_questions):
+        with q_cols[i % 2]:
+            if st.button(suggested_q, key=f"suggested_{i}"):
+                set_suggested_question(suggested_q)
+                st.rerun()
+
+    # -------------------- QUIZ GENERATOR --------------------
+    st.markdown("### 🎯 Quiz Generator")
+
+    if st.button("Generate MCQ Quiz from Current Knowledge Base"):
+        with st.spinner("Generating quiz from your uploaded material..."):
+            quiz_results = retrieve(
+                "important concepts definitions examples exam questions quiz",
+                index,
+                all_chunks
+            )
+
+            if not quiz_results:
+                fallback_chunks = all_chunks[:3]
+                quiz_context = "\n\n".join([c["text"] for c in fallback_chunks])
+            else:
+                quiz_context = build_context(quiz_results)
+
+            st.session_state.generated_quiz = generate_quiz(quiz_context, source_mode)
+
+    if st.session_state.generated_quiz:
+        st.markdown(f"""
+        <div class="answer-box">
+            <span class="ai-label">🎯 Generated Quiz</span><br><br>
+            {st.session_state.generated_quiz}
+        </div>
+        """, unsafe_allow_html=True)
+
+    # -------------------- ASK PANEL --------------------
     st.markdown('<div class="ask-panel">', unsafe_allow_html=True)
 
     st.markdown("### Ask your question")
@@ -517,6 +651,7 @@ if all_chunks:
     if input_mode == "Type Question":
         question = st.text_input(
             "Type your question below:",
+            value=st.session_state.current_question,
             placeholder="Example: Explain the main idea of these documents..."
         )
 
@@ -552,6 +687,8 @@ if all_chunks:
 
     if get_answer:
         if question.strip():
+            st.session_state.current_question = question
+
             with st.spinner("Retrieving relevant context and generating answer..."):
                 results = retrieve(question, index, all_chunks)
 
@@ -561,13 +698,7 @@ if all_chunks:
                     )
                     st.stop()
 
-                context_parts = []
-                for r in results:
-                    context_parts.append(
-                        f"Source: {r['source']} | Page: {r['page']} | Type: {r['type']}\n{r['text']}"
-                    )
-
-                context = "\n\n".join(context_parts)
+                context = build_context(results)
                 answer = ask_groq(question, context, source_mode, answer_style)
 
             st.session_state.chat_history.append({
@@ -600,11 +731,15 @@ if all_chunks:
                 mime="application/pdf"
             )
 
-            with st.expander("📌 View Sources Used"):
-                for r in results:
-                    source_label = "PDF Source" if r["type"] == "PDF" else "Lecture Source"
-                    page_info = f"Page {r['page']}" if r["type"] == "PDF" else f"Chunk {r['chunk_id']}"
+            st.markdown("### 📌 Sources Used")
 
+            for r in results:
+                source_label = "PDF Source" if r["type"] == "PDF" else "Lecture Source"
+                page_info = f"Page {r['page']}" if r["type"] == "PDF" else f"Chunk {r['chunk_id']}"
+
+                with st.expander(
+                    f"{source_label} {r['rank']} | {r['source']} | {page_info} | Score {r['score']:.3f}"
+                ):
                     st.markdown(f"""
                     <div class="source-box">
                         <span class="source-badge">{source_label}</span><br>
@@ -614,8 +749,7 @@ if all_chunks:
                     </div>
                     """, unsafe_allow_html=True)
 
-                    with st.expander(f"Preview retrieved text - Source {r['rank']}"):
-                        st.write(r["text"][:350])
+                    st.write(r["text"][:700])
 
         else:
             st.warning("Please enter or record a question first.")
@@ -624,7 +758,7 @@ if all_chunks:
 # -------------------- CHAT HISTORY --------------------
 if st.session_state.chat_history:
     st.markdown("---")
-    st.markdown("## 💬 Chat History")
+    st.markdown("## 💬 Chat History with Memory")
 
     for i, item in enumerate(reversed(st.session_state.chat_history), 1):
         input_mode_text = item.get("input_mode", "Type Question")
