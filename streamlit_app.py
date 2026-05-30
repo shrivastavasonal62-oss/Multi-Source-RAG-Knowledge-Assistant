@@ -22,6 +22,16 @@ GROQ_MODEL = "llama-3.1-8b-instant"
 TOP_K = 3
 MIN_SCORE = 0.20
 
+st.markdown("""
+    <style>
+        #MainMenu {visibility: hidden;}
+        footer {visibility: hidden;}
+        header {visibility: hidden;}
+        [data-testid="stToolbar"] {visibility: hidden !important;}
+        [data-testid="stDecoration"] {display: none !important;}
+    </style>
+""", unsafe_allow_html=True)
+
 
 def load_css():
     try:
