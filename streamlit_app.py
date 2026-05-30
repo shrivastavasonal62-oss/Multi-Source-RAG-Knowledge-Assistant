@@ -18,7 +18,7 @@ from streamlit_mic_recorder import mic_recorder
 
 GROQ_MODEL = "llama-3.1-8b-instant"
 TOP_K = 3
-MIN_SCORE = 0.40
+MIN_SCORE = 0.20
 
 
 def load_css():
