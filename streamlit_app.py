@@ -425,48 +425,42 @@ Context:
 def render_quiz(quiz_items):
     st.markdown("### 🎯 Generated Quiz")
 
-    if isinstance(quiz_items, str):
-        st.markdown(quiz_items)
-        return
-
-    if not quiz_items:
-        st.warning("Quiz could not be generated. Please try again.")
-        return
-
     for i, item in enumerate(quiz_items, 1):
-        question = html.escape(str(item.get("question", "")))
+        question = html.escape(item.get("question", ""))
         options = item.get("options", {})
-        correct_key = html.escape(str(item.get("correct_answer", "")))
-        explanation = html.escape(str(item.get("explanation", "")))
+        correct = html.escape(item.get("correct_answer", ""))
+        explanation = html.escape(item.get("explanation", ""))
 
-        option_a = html.escape(str(options.get("A", "")))
-        option_b = html.escape(str(options.get("B", "")))
-        option_c = html.escape(str(options.get("C", "")))
-        option_d = html.escape(str(options.get("D", "")))
+        option_a = html.escape(options.get("A", ""))
+        option_b = html.escape(options.get("B", ""))
+        option_c = html.escape(options.get("C", ""))
+        option_d = html.escape(options.get("D", ""))
 
-        correct_text = html.escape(str(options.get(correct_key, "")))
+        st.markdown(
+            f"""
+            <div class="source-box" style="margin-bottom:24px; padding:24px;">
+                <span class="source-badge">QUESTION {i}</span>
 
-        st.markdown(f"""
-        <div class="source-box" style="margin-bottom:24px; padding:22px;">
-            <span class="source-badge">Question {i}</span>
-            <h4 style="margin-top:14px; margin-bottom:16px;">{question}</h4>
+                <h3 style="margin-top:18px; margin-bottom:18px;">
+                    {question}
+                </h3>
 
-            <div style="line-height:1.9;">
                 <p><b>A.</b> {option_a}</p>
                 <p><b>B.</b> {option_b}</p>
                 <p><b>C.</b> {option_c}</p>
                 <p><b>D.</b> {option_d}</p>
-            </div>
 
-            <div style="margin-top:18px; padding:14px; border-radius:14px; background:rgba(34,197,94,0.10);">
-                <b>Correct Answer:</b> {correct_key}. {correct_text}
-            </div>
+                <div style="margin-top:18px; padding:14px; border-radius:14px; background:rgba(34,197,94,0.12);">
+                    <b>Correct Answer:</b> {correct}
+                </div>
 
-            <div style="margin-top:14px;">
-                <b>Explanation:</b> {explanation}
+                <div style="margin-top:14px;">
+                    <b>Explanation:</b> {explanation}
+                </div>
             </div>
-        </div>
-        """, unsafe_allow_html=True)
+            """,
+            unsafe_allow_html=True
+        )
 
 
 def create_answer_pdf(question, answer, source_mode, answer_style):
